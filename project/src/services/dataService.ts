@@ -70,6 +70,59 @@ class DataStore {
 
   constructor() {}
 
+  // LocalStorage keys
+  private LS_DATASETS_KEY = '__datasets__';
+  private LS_ACTIVE_DATASET_KEY = '__active_dataset__';
+  private LS_IMPORT_HISTORY_KEY = '__import_history__';
+
+  private persistDatasets(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      const payload = JSON.stringify(this.rawImportDataMap);
+      window.localStorage.setItem(this.LS_DATASETS_KEY, payload);
+      if (this.activeDatasetName) {
+        window.localStorage.setItem(this.LS_ACTIVE_DATASET_KEY, this.activeDatasetName);
+      }
+    } catch {}
+  }
+
+  loadDatasetsFromLocalStorage(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(this.LS_DATASETS_KEY) || '{}';
+      const map = JSON.parse(raw);
+      if (map && typeof map === 'object') {
+        this.rawImportDataMap = map;
+      }
+      const active = window.localStorage.getItem(this.LS_ACTIVE_DATASET_KEY);
+      if (active && this.rawImportDataMap[active]) {
+        this.activeDatasetName = active;
+      } else {
+        const first = Object.keys(this.rawImportDataMap)[0];
+        this.activeDatasetName = first || null;
+      }
+      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dataset-changed')); } catch {}
+    } catch {}
+  }
+
+  private persistImportHistory(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem(this.LS_IMPORT_HISTORY_KEY, JSON.stringify(this.importHistory));
+    } catch {}
+  }
+
+  loadImportHistoryFromLocalStorage(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(this.LS_IMPORT_HISTORY_KEY);
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) this.importHistory = list;
+      }
+    } catch {}
+  }
+
   // Chart of Accounts methods
   getChartOfAccounts(): ChartOfAccount[] {
     return [...this.chartOfAccounts];
@@ -152,6 +205,7 @@ class DataStore {
     } else {
       this.importHistory.push(entry);
     }
+    this.persistImportHistory();
   }
 
   clearImportHistory(): void {
@@ -170,6 +224,7 @@ class DataStore {
   // Delete individual import by ID
   deleteImportById(importId: string): void {
     this.importHistory = this.importHistory.filter(item => item.id !== importId);
+    this.persistImportHistory();
   }
 
   // Raw import data methods
@@ -186,12 +241,14 @@ class DataStore {
     this.rawImportDataMap[name] = data;
     if (!this.activeDatasetName) this.activeDatasetName = name;
     try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dataset-changed')); } catch {}
+    this.persistDatasets();
   }
 
   clearRawImportData(): void {
     this.rawImportDataMap = {};
     this.activeDatasetName = null;
     try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dataset-changed')); } catch {}
+    this.persistDatasets();
   }
 
   getDatasetNames(): string[] {
@@ -206,6 +263,7 @@ class DataStore {
     if (name && this.rawImportDataMap[name]) {
       this.activeDatasetName = name;
       try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dataset-changed')); } catch {}
+      this.persistDatasets();
     }
   }
 
@@ -221,6 +279,13 @@ class DataStore {
     this.activeDatasetName = null;
     // no browser storage persistence
     // Keep reset logs for audit trail
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(this.LS_DATASETS_KEY);
+        window.localStorage.removeItem(this.LS_ACTIVE_DATASET_KEY);
+        window.localStorage.removeItem(this.LS_IMPORT_HISTORY_KEY);
+      }
+    } catch {}
   }
 
   // Check if system has any data
@@ -389,6 +454,12 @@ export class DataService {
       } catch {}
     }
     return DataService.instance;
+  }
+
+  // Expor carregamento local para o app
+  loadLocalDatasets(): void {
+    try { (dataStore as any).loadDatasetsFromLocalStorage?.(); } catch {}
+    try { (dataStore as any).loadImportHistoryFromLocalStorage?.(); } catch {}
   }
 
   // Factory Reset Implementation

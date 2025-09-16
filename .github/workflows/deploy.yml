@@ -36,8 +36,8 @@ jobs:
           # Base path para GitHub Pages do tipo /<repo>/
           BASE_PATH: /${{ github.event.repository.name }}/
           # Variáveis do Supabase injetadas via Secrets
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || '' }}
         run: npm run build
 
       - name: SPA fallback (copy index.html to 404.html)

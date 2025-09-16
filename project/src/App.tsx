@@ -15,6 +15,8 @@ function App() {
   // Load sample data on app initialization
   React.useEffect(() => {
     loadSampleData();
+    // carregar datasets locais primeiro (fallback)
+    try { (dataService as any)?.loadLocalDatasets?.(); } catch {}
     // tentar carregar datasets do Supabase
     (async () => {
       try { await (dataService as any).syncLoadDatasets?.(); } catch {}
