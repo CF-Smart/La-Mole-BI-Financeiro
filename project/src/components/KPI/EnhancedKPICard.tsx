@@ -87,6 +87,8 @@ const EnhancedKPICard: React.FC<EnhancedKPICardProps> = ({ data }) => {
   const KPIIcon = getKPIIcon();
   const VarianceIcon = getVarianceIcon();
 
+  const isMargin = title === 'Margem Líquida';
+
   return (
     <div className={`rounded-lg shadow-sm hover:shadow-md transition-all duration-300 p-3 border ${getGradientStyle()}`}>
       <div className="flex items-start justify-between mb-2">
@@ -101,11 +103,22 @@ const EnhancedKPICard: React.FC<EnhancedKPICardProps> = ({ data }) => {
           </div>
         </div>
         
-        <div className={`flex items-center ${getVarianceColor()}`}>
-          <VarianceIcon className="h-3 w-3 mr-1" aria-hidden="true" />
-          <span className="text-[10px] font-semibold" aria-label={`Variação: ${variance > 0 ? 'positiva' : 'negativa'} ${Math.abs(variance).toFixed(1)} por cento`}>
-            {variance > 0 ? '+' : ''}{variance.toFixed(1)}%
-          </span>
+        <div className={`flex items-center ${isMargin && marginPercentage !== undefined ? 'text-green-600' : getVarianceColor()}`}>
+          {isMargin && marginPercentage !== undefined ? (
+            <>
+              <TrendingUp className="h-3 w-3 mr-1" aria-hidden="true" />
+              <span className="text-[10px] font-semibold" aria-label={`Margem líquida: ${marginPercentage.toFixed(1)} por cento`}>
+                {marginPercentage.toFixed(1)}%
+              </span>
+            </>
+          ) : (
+            <>
+              <VarianceIcon className="h-3 w-3 mr-1" aria-hidden="true" />
+              <span className="text-[10px] font-semibold" aria-label={`Variação: ${variance > 0 ? 'positiva' : 'negativa'} ${Math.abs(variance).toFixed(1)} por cento`}>
+                {variance > 0 ? '+' : ''}{variance.toFixed(1)}%
+              </span>
+            </>
+          )}
         </div>
       </div>
       

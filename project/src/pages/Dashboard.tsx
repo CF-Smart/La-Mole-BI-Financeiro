@@ -81,6 +81,56 @@ const Dashboard: React.FC = () => {
     );
   }
 
+  // Recalcular Margem Líquida (%) conforme regra solicitada:
+  // (3.01 + 3.02 + 4.01..4.12) / (3.01 + 3.02) no período selecionado
+  const displayKpiData = React.useMemo(() => {
+    const list = [...kpiData];
+    const raw = dataService.getRawImportData();
+    if (!raw || raw.length === 0) return list;
+
+    // soma dos valores "Realizado" entre os meses selecionados em uma linha
+    const sumActualRange = (row: any[], start: number, end: number): number => {
+      let sum = 0;
+      for (let m = start; m <= end; m++) {
+        const actualIdx = 2 + (m * 2); // C, E, G, ...
+        const val = row[actualIdx];
+        const num = typeof val === 'number' ? val : parseFloat(String(val || '0').replace(/[^\d.-]/g, '')) || 0;
+        sum += num;
+      }
+      return sum;
+    };
+
+    const findRowByCodePrefix = (codePrefix: string): any[] | null => {
+      const pattern = new RegExp('^\\s*' + codePrefix.replace('.', '\\.') + '(\\b|\\s)');
+      for (let i = 2; i < raw.length; i++) {
+        const row = raw[i] as any[];
+        const cell = String((row && row[0]) || '').trim();
+        if (pattern.test(cell)) return row;
+      }
+      return null;
+    };
+
+    const sumForCodes = (codes: string[]): number => {
+      return codes.reduce((acc, code) => {
+        const row = findRowByCodePrefix(code);
+        if (!row) return acc;
+        return acc + sumActualRange(row, selectedPeriod.start, selectedPeriod.end);
+      }, 0);
+    };
+
+    const numeratorCodes = ['3.01', '3.02', '4.01', '4.02', '4.03', '4.04', '4.05', '4.06', '4.07', '4.08', '4.09', '4.10', '4.11', '4.12'];
+    const denominatorCodes = ['3.01', '3.02'];
+    const numerator = sumForCodes(numeratorCodes);
+    const denominator = sumForCodes(denominatorCodes);
+
+    const idx = list.findIndex(k => k.title === 'Margem Líquida');
+    if (idx >= 0 && denominator !== 0) {
+      const pct = (numerator / denominator) * 100;
+      list[idx] = { ...list[idx], marginPercentage: pct } as any;
+    }
+    return list;
+  }, [kpiData, selectedPeriod]);
+
   return (
     <div className="flex-1 p-6 bg-gray-50">
       <div className="mb-6">
@@ -102,10 +152,10 @@ const Dashboard: React.FC = () => {
         )}
       </div>
       
-      {kpiData.length > 0 && (
+      {displayKpiData.length > 0 && (
         <div className="mb-8">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-            {kpiData.map((kpi, index) => (
+            {displayKpiData.map((kpi, index) => (
               <EnhancedKPICard key={index} data={kpi} />
             ))}
           </div>

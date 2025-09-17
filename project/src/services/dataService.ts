@@ -1041,8 +1041,8 @@ export class DataService {
         
         kpiData.push({
           title: 'Saldo do Mês Anterior',
-          forecast: saldoActual, // use Realizado always
-          actual: saldoActual,   // Realizado
+          forecast: saldoForecast,
+          actual: saldoActual,
           previousMonth: saldoPrevious,
           type: 'balance'
         });
@@ -1069,8 +1069,8 @@ export class DataService {
 
         kpiData.push({
           title: 'Total Recebimentos',
-          forecast: recebimentosActual, // Realizado
-          actual: recebimentosActual,   // Realizado
+          forecast: recebimentosForecast,
+          actual: recebimentosActual,
           previousMonth: recebimentosPrevious,
           type: 'revenue'
         });
@@ -1085,8 +1085,8 @@ export class DataService {
         
         kpiData.push({
           title: 'CMV/CSP/CPV',
-          forecast: cmvActual, // Realizado
-          actual: cmvActual,   // Realizado
+          forecast: cmvForecast,
+          actual: cmvActual,
           previousMonth: cmvPrevious,
           type: 'expense'
         });
@@ -1101,8 +1101,8 @@ export class DataService {
         
         kpiData.push({
           title: 'Total de Pagamentos',
-          forecast: pagamentosActual, // Realizado
-          actual: pagamentosActual,   // Realizado
+          forecast: pagamentosForecast,
+          actual: pagamentosActual,
           previousMonth: pagamentosPrevious,
           type: 'expense'
         });
@@ -1162,9 +1162,28 @@ export class DataService {
         });
         
         // Calculate net margin
-        const margemForecast = receitaVendasActual - totalExpensesActual; // Realizado
-        const margemActual = receitaVendasActual - totalExpensesActual;   // Realizado
+        const margemForecast = receitaVendasForecast - totalExpensesForecast;
+        const margemActual = receitaVendasActual - totalExpensesActual;
         const margemPrevious = receitaVendasPrevious - totalExpensesPrevious;
+
+        // Custom green percentage: (3.01+3.02+4.01..4.12 do mês atual) / (3.01+3.02 do mês anterior)
+        const sumPrefixesAt = (monthIdx: number, prefixes: string[]): number => {
+          const idxActual = 2 + (monthIdx * 2);
+          let sum = 0;
+          for (let i = 3; i < jsonData.length; i++) {
+            const row = jsonData[i] as any[];
+            const name = String(row[0] || '').trim();
+            if (prefixes.some(p => name.startsWith(p))) {
+              sum += parseCurrency(row[idxActual]);
+            }
+          }
+          return sum;
+        };
+        const currentIdx = currentMonthIndex;
+        const prevIdx = currentIdx > 0 ? currentIdx - 1 : 11;
+        const numeratorNow = sumPrefixesAt(currentIdx, ['3.01','3.02','4.01','4.02','4.03','4.04','4.05','4.06','4.07','4.08','4.09','4.10','4.11','4.12']);
+        const revenuePrev = sumPrefixesAt(prevIdx, ['3.01','3.02']);
+        const marginPctCustom = revenuePrev !== 0 ? (numeratorNow / revenuePrev) * 100 : 0;
         
         kpiData.push({
           title: 'Margem Líquida',
@@ -1172,7 +1191,7 @@ export class DataService {
           actual: margemActual,
           previousMonth: margemPrevious,
           type: 'balance',
-          marginPercentage: receitaVendasActual > 0 ? (margemActual / receitaVendasActual) * 100 : 0,
+          marginPercentage: marginPctCustom,
           expectedMargin: 15 // Expected Net Margin = 15%
         });
       }
@@ -1247,7 +1266,7 @@ export class DataService {
       }
       nextKPI = nextKPI.map(kpi =>
         kpi.title === 'Total Recebimentos'
-          ? { ...kpi, forecast: actual, actual, previousMonth }
+          ? { ...kpi, forecast, actual, previousMonth }
           : kpi
       );
       if (!nextKPI.some(k => k.title === 'Total Recebimentos')) {
@@ -1274,7 +1293,7 @@ export class DataService {
       }
       nextKPI = nextKPI.map(kpi =>
         kpi.title === 'Total de Pagamentos'
-          ? { ...kpi, forecast: actual, actual, previousMonth }
+          ? { ...kpi, forecast, actual, previousMonth }
           : kpi
       );
       if (!nextKPI.some(k => k.title === 'Total de Pagamentos')) {
@@ -1300,7 +1319,7 @@ export class DataService {
       }
       nextKPI = nextKPI.map(kpi =>
         (kpi.title === 'Saldo Final de Caixa' || kpi.title === 'Saldo Final')
-          ? { ...kpi, forecast: actual, actual, previousMonth, type: 'balance' as const }
+          ? { ...kpi, forecast, actual, previousMonth, type: 'balance' as const }
           : kpi
       );
       if (!nextKPI.some(k => k.title === 'Saldo Final de Caixa' || k.title === 'Saldo Final')) {

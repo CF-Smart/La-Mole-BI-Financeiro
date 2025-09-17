@@ -77,6 +77,18 @@ const BudgetSimulator: React.FC = () => {
     return parseFloat(value.replace(/\./g, '').replace(',', '.')) || 0;
   };
 
+  // Helpers: código e tipo por prefixo
+  const extractCodePrefix = (nameOrCode: string): string | null => {
+    const m = String(nameOrCode || '').trim().match(/^\s*(\d\.\d{2})(?=[\s.])/);
+    return m ? m[1] : null;
+  };
+
+  const inferTypeByCode = (code?: string, fallback?: 'revenue' | 'expense' | 'balance'): 'revenue' | 'expense' | 'balance' => {
+    if (code?.startsWith('3.')) return 'revenue';
+    if (/^(4|5|6)\./.test(String(code || ''))) return 'expense';
+    return fallback || 'balance';
+  };
+
   // Calculate parent category values from children
   const getCalculatedBudgetedValue = (item: BudgetItem): number => {
     if (!item.subcategories || item.subcategories.length === 0) {
@@ -175,6 +187,8 @@ const BudgetSimulator: React.FC = () => {
     setEditingField(null);
     setEditValue('');
   };
+
+  // (Removido) edição em massa de receitas
 
   const cancelEditing = () => {
     setEditingItem(null);
@@ -283,8 +297,8 @@ const BudgetSimulator: React.FC = () => {
   const saldoPrevisto = computeSaldoPrevistoFromScenario();
   const saldoDiferenca = saldoAtual - saldoPrevisto;
 
-  // Constrói os dados exibidos com mesmo agrupamento do Fluxo de Caixa (usando Realizado do mês selecionado)
-  const buildDisplayDataLikeCashFlow = (): BudgetItem[] => {
+  // Constrói dados a partir do RAW (cenário original)
+  const buildDisplayDataFromRaw = (): BudgetItem[] => {
     // Se o cenário foi salvo, baseia-se nos dados editáveis (para permitir edição refletir na visão)
     if (scenarioSaved && editableBudgetData.length > 0) {
       // Achata a hierarquia em uma lista plana preservando ids/códigos
@@ -298,36 +312,18 @@ const BudgetSimulator: React.FC = () => {
       };
       walk(editableBudgetData);
 
-      // Trabalha sobre uma cópia
-      const filteredData: BudgetItem[] = flat.map(it => ({ ...it, subcategories: undefined }));
+      // Trabalha sobre uma cópia e remove qualquer linha "Total de Recebimentos"
+      const isTotalRecebimentosName = (name: string) => {
+        const n = String(name || '').toLowerCase();
+        return n.includes('total de recebimentos') || n.includes('total recebimentos') || n.includes('total de recebimento') || n.includes('total recebimento');
+      };
+      const filteredData: BudgetItem[] = flat
+        .map(it => ({ ...it, subcategories: undefined }))
+        .filter(it => !isTotalRecebimentosName(it.category));
 
       // Helpers por código e nome
       const hasPrefix = (code: string | undefined, prefix: string) => !!code && code.startsWith(prefix);
       const nameIs = (name: string | undefined, predicate: (n: string) => boolean) => name ? predicate(name.toLowerCase()) : false;
-
-      // 3.01 dentro de Total de Recebimentos
-      const isTotalRecebimentosName = (name: string) => {
-        const n = name.toLowerCase();
-        return n.includes('total de recebimentos') || n.includes('total recebimentos') || n.includes('total de recebimento') || n.includes('total recebimento');
-      };
-      let parentIndex301 = filteredData.findIndex(item => isTotalRecebimentosName(item.category));
-      const threeZeroOneChildren = filteredData.filter(item => hasPrefix(item.code, '3.01') && !isTotalRecebimentosName(item.category));
-      if (threeZeroOneChildren.length > 0) {
-        const sumActual = threeZeroOneChildren.reduce((s, it) => s + (it.actual || 0), 0);
-        const sumForecast = threeZeroOneChildren.reduce((s, it) => s + (it.forecast || 0), 0);
-        const sumBudgeted = threeZeroOneChildren.reduce((s, it) => s + (it.budgeted || 0), 0);
-        if (parentIndex301 === -1) {
-          const parent: BudgetItem = { id: 'receipts-total', code: '3.01', category: 'Total de Recebimentos', type: 'revenue', actual: sumActual, forecast: sumForecast, budgeted: sumBudgeted, accountType: 'synthetic', level: 0, subcategories: threeZeroOneChildren.map(c => ({ ...c, accountType: 'analytical', level: 1 })) };
-          const remaining = filteredData.filter(item => !threeZeroOneChildren.includes(item));
-          filteredData.splice(0, filteredData.length, parent, ...remaining);
-        } else {
-          const parent = filteredData[parentIndex301];
-          const updatedParent: BudgetItem = { ...parent, code: parent.code || '3.01', type: 'revenue', accountType: 'synthetic', level: 0, subcategories: threeZeroOneChildren.map(c => ({ ...c, accountType: 'analytical', level: 1 })) };
-          const remaining = filteredData.filter((item, idx) => idx === parentIndex301 || !threeZeroOneChildren.includes(item));
-          remaining[parentIndex301] = updatedParent;
-          filteredData.splice(0, filteredData.length, ...remaining);
-        }
-      }
 
       // 4.01 Despesas com Vendas e Serviços
       const isDespVendasServicos = (name: string) => nameIs(name, n => n.includes('despesas com vendas') && n.includes('servi'));
@@ -347,20 +343,10 @@ const BudgetSimulator: React.FC = () => {
         }
       }
 
-      // 3.04 agrupar
-      const threeZeroFour = filteredData.map((it, idx) => ({ it, idx })).filter(e => hasPrefix(e.it.code, '3.04'));
-      if (threeZeroFour.length > 1) {
-        const pIdx = threeZeroFour[0].idx;
-        const children = filteredData.filter((_, idx) => idx !== pIdx && hasPrefix(filteredData[idx].code, '3.04'));
-        const parent = filteredData[pIdx];
-        const updatedParent: BudgetItem = { ...parent, code: parent.code || '3.04', type: 'revenue', accountType: 'synthetic', level: 0, subcategories: children.map(c => ({ ...c, accountType: 'analytical', level: 1 })) };
-        const remaining = filteredData.filter((item, idx) => idx === pIdx || !hasPrefix(item.code, '3.04'));
-        remaining[pIdx] = updatedParent;
-        filteredData.splice(0, filteredData.length, ...remaining);
-      }
+      // (Opcional) 3.04 já incluso no agrupamento de receitas acima
 
       // Genérico N.NN
-      const alreadyHandled = new Set<string>(['3.01', '4.01', '3.04']);
+      const alreadyHandled = new Set<string>(['3.00', '3.01', '3.02', '3.03', '3.04', '4.01']);
       const prefixRegex = /^(\d\.\d{2})/;
       const byPrefix = new Map<string, number[]>();
       filteredData.forEach((item, idx) => {
@@ -418,8 +404,10 @@ const BudgetSimulator: React.FC = () => {
       const categoryName = String(row[0]).trim();
       const actual = parseCurrency(row[actualColIndex]);
       const forecast = parseCurrency(row[forecastColIndex]);
-      const type = categoryName.toLowerCase().includes('receita') || categoryName.toLowerCase().includes('vendas') ? 'revenue' : 'expense';
-      list.push({ id: `sim-${i}`, code: `${i}.01`, category: categoryName, type: type as any, actual, forecast, budgeted: forecast, accountType: 'analytical', level: 1 });
+      const detectedPrefix = extractCodePrefix(categoryName);
+      const code = detectedPrefix || `${i}.00`;
+      const type = inferTypeByCode(detectedPrefix || undefined, (categoryName.toLowerCase().includes('receita') || categoryName.toLowerCase().includes('vendas')) ? 'revenue' : 'expense');
+      list.push({ id: `sim-${i}`, code, category: categoryName, type: type as any, actual, forecast, budgeted: forecast, accountType: 'analytical', level: 1 });
     }
 
     const filteredData: BudgetItem[] = [...list];
@@ -631,20 +619,178 @@ const BudgetSimulator: React.FC = () => {
     return filteredData;
   };
 
-  const displayData = buildDisplayDataLikeCashFlow();
+  // Constrói dados a partir do cenário editável (mantém mesma ordem e agrupamento)
+  const buildDisplayDataFromEditable = (): BudgetItem[] => {
+    if (!scenarioSaved || editableBudgetData.length === 0) return buildDisplayDataFromRaw();
 
-  const renderBudgetItem = (item: BudgetItem, level: number = 0): React.ReactNode => {
+    // Achatar estrutura editável
+    const flat: BudgetItem[] = [];
+    const walk = (items: BudgetItem[]) => {
+      items.forEach(it => {
+        const { subcategories, ...rest } = it as any;
+        flat.push({ ...(rest as BudgetItem), accountType: it.accountType, level: it.level });
+        if (it.subcategories && it.subcategories.length > 0) walk(it.subcategories);
+      });
+    };
+    walk(editableBudgetData);
+
+    // Reaproveitar o mesmo pipeline de agrupamento do RAW
+    // Copiamos o trecho após a criação de 'list' na função anterior
+    const filteredData: BudgetItem[] = [...flat.map(it => ({ ...it, subcategories: undefined }))];
+
+    const parseBool = (v: any) => !!v;
+    const isDespVendasServicos = (name: string) => {
+      const n = String(name || '').toLowerCase();
+      return n.includes('despesas com vendas') && n.includes('servi');
+    };
+    let parentIndex401 = filteredData.findIndex(item => isDespVendasServicos(item.category));
+    const isFourZeroOneCategory = (name: string) => /^\s*4\.01(\.|\s|$)/.test(String(name || ''));
+    const fourZeroOneChildren = filteredData.filter(item => isFourZeroOneCategory(item.category) && !isDespVendasServicos(item.category));
+    if (fourZeroOneChildren.length > 0) {
+      const parent = parentIndex401 === -1 ? null : filteredData[parentIndex401];
+      const updatedParent: BudgetItem = parent ? { ...parent } : { id: 'expenses-sales-services', code: '4.01', category: 'Despesas com Vendas e Serviços', type: 'expense', actual: 0, forecast: 0, budgeted: 0, accountType: 'synthetic', level: 0 } as BudgetItem;
+      updatedParent.subcategories = fourZeroOneChildren.map(c => ({ ...c, accountType: 'analytical', level: 1 }));
+      if (parentIndex401 === -1) {
+        const remaining = filteredData.filter(item => !fourZeroOneChildren.includes(item));
+        filteredData.splice(0, filteredData.length, updatedParent, ...remaining);
+      } else {
+        const remaining = filteredData.filter((item, idx) => idx === parentIndex401 || !fourZeroOneChildren.includes(item));
+        remaining[parentIndex401] = updatedParent;
+        filteredData.splice(0, filteredData.length, ...remaining);
+      }
+    }
+
+    // 3.04 agrupado sob o primeiro 3.04 (mesma lógica)
+    const isThreeZeroFourCategory = (name: string) => /^\s*3\.04(\.|\s|$)/.test(String(name || ''));
+    const threeZeroFourIndices = filteredData.map((item, idx) => ({ item, idx })).filter(e => isThreeZeroFourCategory(e.item.category));
+    if (threeZeroFourIndices.length > 1) {
+      const pIdx = threeZeroFourIndices[0].idx;
+      const children = filteredData.filter((_, idx) => idx !== pIdx && isThreeZeroFourCategory(filteredData[idx].category));
+      const parent = filteredData[pIdx];
+      const updatedParent: BudgetItem = {
+        ...parent,
+        code: parent.code || '3.04',
+        type: 'revenue',
+        accountType: 'synthetic',
+        level: 0,
+        subcategories: children.map(c => ({ ...c, accountType: 'analytical', level: 1 }))
+      };
+      const remaining = filteredData.filter((item, idx) => idx === pIdx || !isThreeZeroFourCategory(item.category));
+      remaining[pIdx] = updatedParent;
+      filteredData.splice(0, filteredData.length, ...remaining);
+    }
+
+    // Agrupamentos genéricos por prefixo N.NN (igual RAW, sem criar Total Recebimentos)
+    const alreadyHandled = new Set<string>(['4.01', '3.04']);
+    const prefixRegex = /^\s*(\d\.\d{2})(?=[\s.])/;
+    const prefixToIndices = new Map<string, number[]>();
+    filteredData.forEach((item, idx) => {
+      const match = String(item.category || '').match(prefixRegex);
+      if (!match) return;
+      const prefix = match[1];
+      if (alreadyHandled.has(prefix)) return;
+      if (!prefixToIndices.has(prefix)) prefixToIndices.set(prefix, []);
+      prefixToIndices.get(prefix)!.push(idx);
+    });
+    for (const [prefix, indices] of prefixToIndices.entries()) {
+      if (!indices || indices.length < 2) continue;
+      const parentIndex = indices[0];
+      const childrenIdx = new Set(indices.slice(1));
+      const children = filteredData.filter((_, idx) => childrenIdx.has(idx));
+      if (children.length === 0) continue;
+      const parent = filteredData[parentIndex];
+      const parentType = parent.type || (prefix.startsWith('3.') ? 'revenue' : prefix.startsWith('4.') ? 'expense' : 'balance');
+      const updatedParent: BudgetItem = {
+        ...parent,
+        code: parent.code || prefix,
+        type: parentType as any,
+        accountType: 'synthetic',
+        level: 0,
+        subcategories: children.map(c => ({ ...c, accountType: 'analytical', level: 1 }))
+      };
+      const remaining = filteredData.filter((_, idx) => idx === parentIndex || !childrenIdx.has(idx));
+      const parentPos = remaining.findIndex((_, i) => i === parentIndex);
+      if (parentPos >= 0) remaining[parentPos] = updatedParent;
+      filteredData.splice(0, filteredData.length, ...remaining);
+    }
+
+    // Despesa Operacional (igual RAW)
+    const operationalPrefixes = ['4.03', '4.04', '4.05', '4.06', '4.07', '4.08', '4.09', '4.10', '4.12'];
+    const isOperational = (name: string) => operationalPrefixes.some(pref => new RegExp(`^\\s*${pref}(\\.|\\s|$)`).test(String(name || '').trim()));
+    const opItems = filteredData.map((item, idx) => ({ item, idx })).filter(e => isOperational(e.item.category) && String(e.item.category || '').trim().toLowerCase() !== 'despesa operacional');
+    if (opItems.length > 0) {
+      const sumActual = opItems.reduce((s, e) => s + (e.item.actual || 0), 0);
+      const sumForecast = opItems.reduce((s, e) => s + (e.item.forecast || 0), 0);
+      const sumBudgeted = opItems.reduce((s, e) => s + (e.item.budgeted || 0), 0);
+      const operationalParent: BudgetItem = {
+        id: 'operational-expenses',
+        code: '4.OP',
+        category: 'Despesa Operacional',
+        type: 'expense',
+        actual: sumActual,
+        forecast: sumForecast,
+        budgeted: sumBudgeted,
+        accountType: 'synthetic',
+        level: 0,
+        subcategories: opItems.map(e => ({ ...e.item }))
+      };
+      const toRemove = new Set(opItems.map(e => e.idx));
+      let remaining = filteredData.filter((_, idx) => !toRemove.has(idx));
+      const anchor = remaining.findIndex(it => isDespVendasServicos(it.category));
+      if (anchor === -1) remaining = [operationalParent, ...remaining]; else remaining.splice(anchor + 1, 0, operationalParent);
+      filteredData.splice(0, filteredData.length, ...remaining);
+    }
+
+    // Despesas Não Operacionais (igual RAW)
+    const isFiveZeroOne = (name: string) => /^\s*5\.01(\.|\s|$)/.test(String(name || ''));
+    const isSixZeroOne = (name: string) => /^\s*6\.01(\.|\s|$)/.test(String(name || ''));
+    const noItems = filteredData.map((item, idx) => ({ item, idx })).filter(e => (isFiveZeroOne(e.item.category) || isSixZeroOne(e.item.category)) && String(e.item.category || '').trim().toLowerCase() !== 'despesas não operacionais');
+    if (noItems.length > 0) {
+      const sumActual = noItems.reduce((s, e) => s + (e.item.actual || 0), 0);
+      const sumForecast = noItems.reduce((s, e) => s + (e.item.forecast || 0), 0);
+      const sumBudgeted = noItems.reduce((s, e) => s + (e.item.budgeted || 0), 0);
+      const nonOpParent: BudgetItem = {
+        id: 'non-operational-expenses',
+        code: '5-6.NO',
+        category: 'Despesas Não Operacionais',
+        type: 'expense',
+        actual: sumActual,
+        forecast: sumForecast,
+        budgeted: sumBudgeted,
+        accountType: 'synthetic',
+        level: 0,
+        subcategories: noItems.map(e => ({ ...e.item }))
+      };
+      const toRemove = new Set(noItems.map(e => e.idx));
+      const remaining = filteredData.filter((_, idx) => !toRemove.has(idx));
+      const opIndex = remaining.findIndex(it => String(it.category || '').trim().toLowerCase() === 'despesa operacional');
+      if (opIndex === -1) {
+        filteredData.splice(0, filteredData.length, ...remaining, nonOpParent);
+      } else {
+        remaining.splice(opIndex + 1, 0, nonOpParent);
+        filteredData.splice(0, filteredData.length, ...remaining);
+      }
+    }
+
+    return filteredData;
+  };
+
+  const renderBudgetItem = (item: BudgetItem, level: number = 0, allowEdit: boolean = true): React.ReactNode => {
     const hasChildren = item.subcategories && item.subcategories.length > 0;
     const isExpanded = expandedItems.has(item.id);
     const isEditing = editingItem === item.id;
     const isSynthetic = item.accountType === 'synthetic';
     const calculatedBudgeted = getCalculatedBudgetedValue(item);
     
-    const variance = ((item.actual - calculatedBudgeted) / calculatedBudgeted) * 100;
+    // Diferença entre Real x Forecast
+    const varianceAbs = (item.actual || 0) - (item.forecast || 0);
+    const variancePct = (item.forecast || 0) !== 0 ? (varianceAbs / item.forecast) * 100 : 0;
     
     const getRowColor = () => {
-      if (item.type === 'revenue') return 'bg-green-50 border-green-200';
-      if (item.type === 'expense') return 'bg-red-50 border-red-200';
+      const code = item.code || extractCodePrefix(item.category) || '';
+      const t = inferTypeByCode(code, item.type);
+      if (t === 'revenue') return 'bg-green-50 border-green-200';
+      if (t === 'expense') return 'bg-red-50 border-red-200';
       return 'bg-blue-50 border-blue-200';
     };
 
@@ -670,7 +816,7 @@ const BudgetSimulator: React.FC = () => {
           
           <td className="px-4 py-3 text-right">
             <div className="flex items-center justify-end">
-              {isEditing && editingField === 'budgeted' ? (
+              {allowEdit && isEditing && editingField === 'budgeted' ? (
                 <input
                   type="text"
                   value={editValue}
@@ -686,16 +832,16 @@ const BudgetSimulator: React.FC = () => {
               ) : (
                 <div 
                   className={`flex items-center ${
-                    isSynthetic 
-                      ? 'cursor-not-allowed bg-gray-100 px-2 py-1 rounded text-gray-500' 
+                    isSynthetic || !allowEdit
+                      ? 'cursor-not-allowed bg-gray-100 px-2 py-1 rounded text-gray-500'
                       : 'cursor-pointer hover:bg-blue-100 px-2 py-1 rounded transition-colors'
                   }`}
-                  onClick={() => !isSynthetic && startEditing(item.id, 'budgeted', calculatedBudgeted)}
+                  onClick={() => allowEdit && !isSynthetic && startEditing(item.id, 'budgeted', calculatedBudgeted)}
                 >
                   <span className="font-mono">
                     {formatBrazilianNumber(calculatedBudgeted)}
                   </span>
-                  {!isSynthetic && (
+                  {allowEdit && !isSynthetic && (
                     <Edit3 size={12} className="ml-2 text-gray-400 opacity-0 group-hover:opacity-100" />
                   )}
                   {isSynthetic && (
@@ -712,7 +858,7 @@ const BudgetSimulator: React.FC = () => {
           
           <td className="px-4 py-3 text-right">
             <div className="flex items-center justify-end">
-              {isEditing && editingField === 'actual' ? (
+              {allowEdit && isEditing && editingField === 'actual' ? (
                 <input
                   type="text"
                   value={editValue}
@@ -728,16 +874,16 @@ const BudgetSimulator: React.FC = () => {
               ) : (
                 <div 
                   className={`flex items-center ${
-                    isSynthetic 
-                      ? 'cursor-not-allowed bg-gray-100 px-2 py-1 rounded text-gray-500' 
+                    isSynthetic || !allowEdit
+                      ? 'cursor-not-allowed bg-gray-100 px-2 py-1 rounded text-gray-500'
                       : 'cursor-pointer hover:bg-blue-100 px-2 py-1 rounded transition-colors'
                   }`}
-                  onClick={() => !isSynthetic && startEditing(item.id, 'actual', item.actual)}
+                  onClick={() => allowEdit && !isSynthetic && startEditing(item.id, 'actual', item.actual)}
                 >
                   <span className="font-mono">
                     {formatBrazilianNumber(item.actual)}
                   </span>
-                  {!isSynthetic && (
+                  {allowEdit && !isSynthetic && (
                     <Edit3 size={12} className="ml-2 text-gray-400 opacity-0 group-hover:opacity-100" />
                   )}
                   {isSynthetic && (
@@ -749,18 +895,22 @@ const BudgetSimulator: React.FC = () => {
           </td>
           
           <td className="px-4 py-3 text-right">
-            <span className={`font-mono ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {variance >= 0 ? '+' : ''}{variance.toFixed(1)}%
-            </span>
+            <div className={`font-mono ${varianceAbs >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div>{varianceAbs >= 0 ? '+' : ''}{formatBrazilianNumber(varianceAbs)}</div>
+              <div className="text-[10px] opacity-80">{variancePct >= 0 ? '+' : ''}{variancePct.toFixed(1)}%</div>
+            </div>
           </td>
         </tr>
         
         {hasChildren && isExpanded && item.subcategories?.map(child => 
-          renderBudgetItem(child, level + 1)
+          renderBudgetItem(child, level + 1, allowEdit)
         )}
       </React.Fragment>
     );
   };
+
+  const originalData = buildDisplayDataFromRaw();
+  const simulatedData = buildDisplayDataFromEditable();
 
   return (
     <div className="p-6 bg-white">
@@ -891,49 +1041,54 @@ const BudgetSimulator: React.FC = () => {
         </div>
       </div>
 
-      {/* Budget Table */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Cenário Simulado</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Clique nos valores da coluna "Orçado" para editar contas analíticas • Grupos sintéticos são calculados automaticamente
-          </p>
+      {/* (Removido) Edição em Massa (Receitas 3.xx) */}
+
+      {/* Budget Tables: Original vs Simulado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">Cenário Original</h2>
+            <p className="text-sm text-gray-600 mt-1">Mesma ordem e agrupamento do fluxo de caixa (somente leitura)</p>
+          </div>
+          <div className="overflow-x-auto flex-grow">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Categoria</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Orçado</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Forecast</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Real</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Variação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {originalData.map(item => renderBudgetItem(item, 0, false))}
+              </tbody>
+            </table>
+          </div>
         </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">
-                  Categoria
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                  <div className="flex items-center justify-end">
-                    Orçado
-                    <span className="ml-1 text-xs text-blue-600">✏️ Analíticas</span>
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                  <div className="flex items-center justify-end">
-                    Forecast
-                    <span className="ml-1 text-xs text-gray-500">📊 Dados</span>
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                  <div className="flex items-center justify-end">
-                    Real
-                    <span className="ml-1 text-xs text-gray-500">📊 Dados</span>
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                  Variação
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {displayData.map(item => renderBudgetItem(item))}
-            </tbody>
-          </table>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">Cenário Simulado</h2>
+            <p className="text-sm text-gray-600 mt-1">Edite a coluna "Orçado" (analíticas); grupos recalculam automaticamente.</p>
+          </div>
+          <div className="overflow-x-auto flex-grow">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Categoria</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Orçado</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Forecast</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Real</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Variação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {simulatedData.map(item => renderBudgetItem(item, 0, true))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

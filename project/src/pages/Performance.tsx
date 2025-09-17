@@ -43,10 +43,11 @@ const Performance: React.FC = () => {
     const { headerRowIndex, isSimplified } = detectHeaderInfo(raw);
     const dataStart = Math.max(headerRowIndex + 1, 2);
     const colActual = (m: number) => (isSimplified ? (1 + m) : (2 + (m * 2)));
+    const colForecast = (m: number) => (isSimplified ? (1 + m) : (1 + (m * 2)));
     const prevMonth = (m: number) => (m - 1 + 12) % 12;
     const matchCompany = (_name: string) => true; // filtro por empresa cancelado
 
-    const getMonthVal = (pred: (n: string) => boolean, m: number) => {
+    const getMonthValActual = (pred: (n: string) => boolean, m: number) => {
       for (let i = dataStart; i < raw.length; i++) {
         const nm = String((raw[i] as any[])[0] || '').trim();
         if (!matchCompany(nm)) continue;
@@ -56,44 +57,74 @@ const Performance: React.FC = () => {
       }
       return 0;
     };
-    const getYTD = (pred: (n: string) => boolean, m: number) => {
+    const getMonthValForecast = (pred: (n: string) => boolean, m: number) => {
+      for (let i = dataStart; i < raw.length; i++) {
+        const nm = String((raw[i] as any[])[0] || '').trim();
+        if (!matchCompany(nm)) continue;
+        if (pred(nm.toLowerCase())) {
+          return parseCurrencyToNumber((raw[i] as any[])[colForecast(m)]);
+        }
+      }
+      return 0;
+    };
+    const getYTDActual = (pred: (n: string) => boolean, m: number) => {
       let sum = 0;
-      for (let k = 0; k <= m; k++) sum += getMonthVal(pred, k);
+      for (let k = 0; k <= m; k++) sum += getMonthValActual(pred, k);
       return sum;
     };
-    const getALL = (pred: (n: string) => boolean) => {
+    const getYTDForecast = (pred: (n: string) => boolean, m: number) => {
       let sum = 0;
-      for (let k = 0; k < 12; k++) sum += getMonthVal(pred, k);
+      for (let k = 0; k <= m; k++) sum += getMonthValForecast(pred, k);
+      return sum;
+    };
+    const getALLActual = (pred: (n: string) => boolean) => {
+      let sum = 0;
+      for (let k = 0; k < 12; k++) sum += getMonthValActual(pred, k);
+      return sum;
+    };
+    const getALLForecast = (pred: (n: string) => boolean) => {
+      let sum = 0;
+      for (let k = 0; k < 12; k++) sum += getMonthValForecast(pred, k);
       return sum;
     };
 
-    const receitaNow = (monthIsAll)
-      ? getALL(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'))
-      : getMonthVal(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'), month);
+    const receitaActualNow = (monthIsAll)
+      ? getALLActual(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'))
+      : getMonthValActual(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'), month);
+    const receitaForecastNow = (monthIsAll)
+      ? getALLForecast(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'))
+      : getMonthValForecast(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'), month);
     const receitaPrev = (monthIsAll)
-      ? getALL(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'))
-      : getMonthVal(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'), prevMonth(month));
+      ? getALLActual(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'))
+      : getMonthValActual(n => n.includes('3.01') || n.includes('receitas de vendas') || n.includes('receita de vendas'), prevMonth(month));
 
-    const cmvNowRaw = (monthIsAll)
-      ? getALL(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')))
-      : getMonthVal(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')), month);
+    const cmvNowActualRaw = (monthIsAll)
+      ? getALLActual(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')))
+      : getMonthValActual(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')), month);
+    const cmvNowForecastRaw = (monthIsAll)
+      ? getALLForecast(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')))
+      : getMonthValForecast(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')), month);
     const cmvPrevRaw = (monthIsAll)
-      ? getALL(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')))
-      : getMonthVal(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')), prevMonth(month));
-    const cmvNow = Math.abs(cmvNowRaw);
+      ? getALLActual(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')))
+      : getMonthValActual(n => n.includes('4.01') || (n.includes('despesas com vendas') && n.includes('servi')), prevMonth(month));
+    const cmvNow = Math.abs(cmvNowActualRaw);
+    const cmvNowForecast = Math.abs(cmvNowForecastRaw);
     const cmvPrev = Math.abs(cmvPrevRaw);
 
-    const saldoNow = (monthIsAll)
-      ? getALL(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'))
-      : getMonthVal(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'), month);
+    const saldoNowActual = (monthIsAll)
+      ? getALLActual(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'))
+      : getMonthValActual(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'), month);
+    const saldoNowForecast = (monthIsAll)
+      ? getALLForecast(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'))
+      : getMonthValForecast(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'), month);
     const saldoPrev = (monthIsAll)
-      ? getALL(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'))
-      : getMonthVal(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'), prevMonth(month));
+      ? getALLActual(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'))
+      : getMonthValActual(n => n.includes('saldo final de caixa') || n === 'saldo final' || n.includes('saldo final líquido'), prevMonth(month));
 
     const view: KPICard[] = [
-      { title: 'Receita Total', forecast: receitaNow, actual: receitaNow, previousMonth: receitaPrev, type: 'revenue' },
-      { title: 'CMV/CSP/CPV', forecast: cmvNow, actual: cmvNow, previousMonth: cmvPrev, type: 'expense' },
-      { title: 'Saldo Final de Caixa', forecast: saldoNow, actual: saldoNow, previousMonth: saldoPrev, type: 'balance' },
+      { title: 'Receita Total', forecast: receitaForecastNow, actual: receitaActualNow, previousMonth: receitaPrev, type: 'revenue' },
+      { title: 'CMV/CSP/CPV', forecast: cmvNowForecast, actual: cmvNow, previousMonth: cmvPrev, type: 'expense' },
+      { title: 'Saldo Final de Caixa', forecast: saldoNowForecast, actual: saldoNowActual, previousMonth: saldoPrev, type: 'balance' },
     ];
     setKpiView(view);
   }, [raw, selectedMonthIdx]);
@@ -252,16 +283,7 @@ const Performance: React.FC = () => {
           </div>
         </div>
 
-        {/* Receita: Últimos 3 meses (ano atual) vs mesmos meses de 2024 */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-8">
-          <h3 className="text-xl font-semibold text-gray-900 mb-4">Receita: Últimos 3 Meses vs Mesmos Meses de 2024</h3>
-          <RechartsLine
-            title="Receita 3M vs 2024"
-            data={buildRevenueLast3Mvs2024({ monthIndex: selectedMonthIdx }, 2024)}
-            height={360}
-            colors={{ current: '#2563eb', previous: '#7c3aed' }}
-          />
-        </div>
+        {/* (Removido) Receita: Últimos 3 Meses vs Mesmos Meses de 2024 */}
 
         {/* Outras séries */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
